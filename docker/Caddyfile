@@ -1,0 +1,7 @@
+{$APP_DOMAIN} {
+	encode gzip
+	reverse_proxy ui:8501
+}
+{$KC_DOMAIN} {
+	reverse_proxy keycloak:8080
+}

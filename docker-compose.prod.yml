@@ -1,83 +1,51 @@
+# Production-style stack. Only Caddy (80/443) is published. Needs a real domain with DNS pointing here.
+x-app: &app
+  build: .
+  env_file: .env
+  restart: unless-stopped
 services:
-  caddy:
-    image: caddy:2-alpine
+  postgres:
+    image: postgres:16
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - iamops
-
-  iamops:
-    build: .
-    restart: unless-stopped
-    environment:
-      ENV: prod
-      NODE_ENV: production
-      PORT: "3000"
-      APP_URL: ${APP_URL:-https://iamops.meridianwealth.internal}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set >= 32 chars}
-      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY must be set >= 32 chars}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD must be set}
-      DATABASE_PATH: /app/data/iamops.db
-      SLA_SWEEP_MINUTES: ${SLA_SWEEP_MINUTES:-5}
-      DISABLE_API_DOCS: "true"
-      KEYCLOAK_URL: http://keycloak:8080
-      KEYCLOAK_REALM: meridian
-      KEYCLOAK_CLIENT_ID: iamops-console
-      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
-      LDAP_URL: ldap://openldap:389
-      LDAP_BASE_DN: dc=meridian,dc=internal
-    volumes:
-      - iamops_data:/app/data
-    depends_on:
-      - keycloak
-      - openldap
-
-  postgres_kc:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: keycloak
-      POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD must be set}
-    volumes:
-      - kc_pg_data:/var/lib/postgresql/data
-
+    environment: {POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: "${POSTGRES_DB}", KEYCLOAK_DB_PASSWORD: "${KEYCLOAK_DB_PASSWORD}"}
+    volumes: [pgdata:/var/lib/postgresql/data, ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/10-keycloak.sh:ro]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"], interval: 5s, retries: 20}
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
     restart: unless-stopped
-    command: start --optimized --http-enabled=true --hostname-strict=false
+    command: start
     environment:
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres_kc:5432/keycloak
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: ${KC_DOMAIN}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-    depends_on:
-      - postgres_kc
-
+    depends_on: {postgres: {condition: service_healthy}}
   openldap:
     image: osixia/openldap:1.5.0
     restart: unless-stopped
-    environment:
-      LDAP_ORGANISATION: "Meridian Wealth Services"
-      LDAP_DOMAIN: "meridian.internal"
-      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:?LDAP_ADMIN_PASSWORD must be set}
-    volumes:
-      - ldap_data:/var/lib/ldap
-      - ldap_config:/etc/ldap/slapd.d
-
-volumes:
-  caddy_data:
-  caddy_config:
-  iamops_data:
-  kc_pg_data:
-  ldap_data:
-  ldap_config:
+    environment: {LDAP_ORGANISATION: "Meridian Wealth Services", LDAP_DOMAIN: "${LDAP_DOMAIN}", LDAP_ADMIN_PASSWORD: "${LDAP_ADMIN_PASSWORD}"}
+    volumes: [ldapdata:/var/lib/ldap, ldapconf:/etc/ldap/slapd.d]
+  api:
+    <<: *app
+    command: sh -c "python -m backend.app.migrate && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='*'"
+    depends_on: {postgres: {condition: service_healthy}}
+    healthcheck: {test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/ready')"], interval: 10s, retries: 10}
+  ui:
+    <<: *app
+    command: streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=8501 --server.headless=true --server.enableXsrfProtection=true --browser.gatherUsageStats=false
+    environment: {API_URL: "http://api:8000"}
+    depends_on: {api: {condition: service_healthy}}
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: {APP_DOMAIN: "${APP_DOMAIN}", KC_DOMAIN: "${KC_DOMAIN}"}
+    volumes: [./docker/Caddyfile:/etc/caddy/Caddyfile:ro, caddydata:/data]
+    depends_on: [ui, keycloak]
+volumes: {pgdata: {}, ldapdata: {}, ldapconf: {}, caddydata: {}}

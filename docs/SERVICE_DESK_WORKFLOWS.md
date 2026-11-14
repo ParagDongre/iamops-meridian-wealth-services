@@ -1,0 +1,2 @@
+# Service Desk (custom ITSM simulation)
+Types: Incident, Request, Task. Status: New → Assigned → In Progress → Resolved → Closed (notes required to resolve). SLA by priority: Critical 4h, High 8h, Medium 24h, Low 72h, stored as `sla_deadline` at creation. `POST /tickets/sla-sweep` escalates breached tickets once to L2 (history in `ticket_escalations`) and lists overdue work items; schedule it in real use. Provisioning failures and certification investigations create linked tickets.

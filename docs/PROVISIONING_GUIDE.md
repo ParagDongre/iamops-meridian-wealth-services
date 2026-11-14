@@ -1,0 +1,3 @@
+# Provisioning
+Order: precheck (active identity, SoD) → each connector (idempotent) → local assignment only if ALL connectors succeed. Failures are stored on the work item (`error`, `retry_count`), the request becomes Failed and one incident is opened. Retry is safe (connectors check state first; unique keys on work items, accounts, assignments). After 3 failed attempts the item is Escalated (L2).
+Modes via `CONNECTORS`: `none` (local state only, noted on the work item), `keycloak`, `ldap`, or `keycloak,ldap`. Connectors are unit-tested only through a fake; live tests are opt-in in `tests/integration`.

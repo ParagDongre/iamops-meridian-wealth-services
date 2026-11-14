@@ -1,0 +1,4 @@
+# JML Workflows
+**Joiner** `POST /jml/joiner`: create identity → role entitlements → one access request each → approvals (manager, app owner, compliance if sensitive) → work item → connectors → local assignment → audit. No access exists until approvals complete.
+**Mover** `POST /jml/mover/{id}`: apply changes → revoke role-derived access not in the new role (revocations first, so they cannot cause SoD conflicts) → request new-role access → ad-hoc access is kept but returned as `review_required`.
+**Leaver** `POST /jml/leaver/{id}` (admin): Terminated+Disabled → cancel open requests → revoke all assignments → remove group memberships → disable external accounts via a work item. Safeguard: raises if any active assignment remains. If the external disable fails, the response shows `external_disable_status: Failed` and an incident ticket is opened.
