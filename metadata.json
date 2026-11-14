@@ -1,0 +1,6 @@
+{
+  "name": "IAMOps — Meridian Wealth Services",
+  "description": "Enterprise Identity & Access Management Operations Lab simulating identity lifecycle, JML workflows, RBAC & SoD controls, multi-stage access approvals, provisioning orchestration, ITSM ticketing, access certification, and hash-chained audit compliance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
